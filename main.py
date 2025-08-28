@@ -11,10 +11,15 @@ import websocket
 # --- Environment variables (set in Railway) ---
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "")
-FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
-FACEBOOK_USER_ACCESS_TOKEN = os.getenv("FACEBOOK_USER_ACCESS_TOKEN", "")
+
+FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID")
+FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET")
+FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
+FACEBOOK_USER_TOKEN = os.getenv("FACEBOOK_USER_TOKEN")
+
 KICK_USERNAME = os.getenv("KICK_USERNAME", "")
 KICK_CHANNEL = os.getenv("KICK_CHANNEL", "")
+
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "chat-notifier")
 NTFY_CONTROL_TOPIC = os.getenv("NTFY_CONTROL_TOPIC", "chatcontrol")
 
