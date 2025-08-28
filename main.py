@@ -14,11 +14,10 @@ YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "")
 FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID", "")
 FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
-FACEBOOK_USER_TOKEN = os.getenv("FACEBOOK_USER_TOKEN", "")  # long-lived user token
+FACEBOOK_SHORT_TOKEN = os.getenv("FACEBOOK_SHORT_TOKEN", "")
 KICK_USERNAME = os.getenv("KICK_USERNAME", "")
 KICK_CHANNEL = os.getenv("KICK_CHANNEL", "")
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "chat-notifier")  # for chat messages
-NTFY_CONTROL_TOPIC = os.getenv("NTFY_CONTROL_TOPIC", "chatcontrol")  # for !start/!stop control
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "chat-notifier")
 
 # --- Queue for ntfy messages ---
 ntfy_queue = queue.Queue()
@@ -29,35 +28,22 @@ running = True
 def ntfy_worker():
     global running
     print("📡 NTFY Worker started")
-
-    def control_listener():
-        global running
-        url = f"https://ntfy.sh/{NTFY_CONTROL_TOPIC}/json"
-        print(f"📡 Listening for control commands on {url}")
-        with requests.get(url, stream=True) as r:
-            for line in r.iter_lines():
-                if line:
-                    try:
-                        data = json.loads(line.decode("utf-8"))
-                        msg = data.get("message", "").strip().lower()
-                        if msg == "!stop":
-                            running = False
-                            print("⏹️ Received STOP command")
-                        elif msg == "!start":
-                            running = True
-                            print("▶️ Received START command")
-                    except:
-                        pass
-
-    threading.Thread(target=control_listener, daemon=True).start()
-
     while True:
         try:
             topic, user, msg = ntfy_queue.get()
+            if msg.strip().lower() == "!stop":
+                running = False
+                print("⏹️ Received STOP command")
+                continue
+            elif msg.strip().lower() == "!start":
+                running = True
+                print("▶️ Received START command")
+                continue
+
             if running:
                 requests.post(f"https://ntfy.sh/{NTFY_TOPIC}",
                               data=f"[{topic}] {user}: {msg}".encode("utf-8"))
-                time.sleep(5)  # delay between messages
+                time.sleep(5)  # delay 5s between messages
         except Exception as e:
             print("NTFY Worker error:", e)
 
@@ -114,7 +100,7 @@ def get_facebook_page_token():
             "grant_type": "fb_exchange_token",
             "client_id": FACEBOOK_APP_ID,
             "client_secret": FACEBOOK_APP_SECRET,
-            "fb_exchange_token": FACEBOOK_USER_TOKEN,
+            "fb_exchange_token": FACEBOOK_SHORT_TOKEN,
         }
         r = requests.get(url, params=params).json()
         long_token = r.get("access_token")
