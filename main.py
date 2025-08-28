@@ -8,34 +8,35 @@ import threading
 import requests
 import websocket
 
-# --- Environment variables (set these in Railway) ---
+# --- Environment variables (set in Railway) ---
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "")
-FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID", "")
-FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
-FACEBOOK_USER_TOKEN = os.getenv("FACEBOOK_USER_TOKEN", "")
+FACEBOOK_USER_ACCESS_TOKEN = os.getenv("FACEBOOK_USER_ACCESS_TOKEN", "")
 KICK_USERNAME = os.getenv("KICK_USERNAME", "")
 KICK_CHANNEL = os.getenv("KICK_CHANNEL", "")
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "streamchats123")   # where chat messages go
-NTFY_CONTROL_TOPIC = os.getenv("NTFY_CONTROL_TOPIC", "chatcontrol")  # where start/stop comes from
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "chat-notifier")
+NTFY_CONTROL_TOPIC = os.getenv("NTFY_CONTROL_TOPIC", "chatcontrol")
 
 # --- Queue for ntfy messages ---
 ntfy_queue = queue.Queue()
 running = True
 
 
-# --- NTFY Worker (sends chat messages) ---
+# --- NTFY Worker (with start/stop) ---
 def ntfy_worker():
     global running
     print("📡 NTFY Worker started")
+    # Notify successful worker connection
+    requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data="✅ NTFY Worker connected".encode("utf-8"))
+
     while True:
         try:
-            platform, user, msg = ntfy_queue.get()
+            topic, user, msg = ntfy_queue.get()
             if running:
                 requests.post(f"https://ntfy.sh/{NTFY_TOPIC}",
-                              data=f"[{platform}] {user}: {msg}".encode("utf-8"))
-                time.sleep(5)  # delay between messages
+                              data=f"[{topic}] {user}: {msg}".encode("utf-8"))
+                time.sleep(2)  # small delay
         except Exception as e:
             print("NTFY Worker error:", e)
 
@@ -44,29 +45,30 @@ def send_ntfy(platform, user, msg):
     ntfy_queue.put((platform, user, msg))
 
 
-# --- NTFY Control Listener (start/stop) ---
-def ntfy_control_listener():
+# --- NTFY Control Listener ---
+def ntfy_control():
     global running
+    print("📡 Listening for control messages...")
     url = f"https://ntfy.sh/{NTFY_CONTROL_TOPIC}/json"
-    print(f"📡 Listening for control messages on {url}")
     try:
         with requests.get(url, stream=True) as r:
             for line in r.iter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line.decode("utf-8"))
-                    msg = data.get("message", "").strip().lower()
-                    if msg == "start":
-                        running = True
-                        print("▶️ Control: START received")
-                    elif msg == "stop":
-                        running = False
-                        print("⏹️ Control: STOP received")
-                except Exception:
-                    continue
+                if line:
+                    try:
+                        data = json.loads(line.decode("utf-8"))
+                        msg = data.get("message", "").strip().lower()
+                        if msg == "!stop":
+                            running = False
+                            print("⏹️ Control: STOP received")
+                            requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data="⏹️ Chat forwarding stopped".encode("utf-8"))
+                        elif msg == "!start":
+                            running = True
+                            print("▶️ Control: START received")
+                            requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data="▶️ Chat forwarding resumed".encode("utf-8"))
+                    except:
+                        pass
     except Exception as e:
-        print("NTFY control listener error:", e)
+        print("NTFY Control error:", e)
 
 
 # --- YouTube ---
@@ -86,6 +88,8 @@ def connect_youtube():
             live_url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId={get_livechat_id(video_id)}&part=snippet,authorDetails&key={YOUTUBE_API_KEY}"
 
             print("✅ Connected to YouTube live chat")
+            requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data="✅ YouTube connected".encode("utf-8"))
+
             page_token = None
             while True:
                 resp = requests.get(live_url + (f"&pageToken={page_token}" if page_token else ""))
@@ -110,38 +114,11 @@ def get_livechat_id(video_id):
 
 
 # --- Facebook ---
-def get_facebook_page_token():
-    try:
-        url = f"https://graph.facebook.com/v17.0/oauth/access_token"
-        params = {
-            "grant_type": "fb_exchange_token",
-            "client_id": FACEBOOK_APP_ID,
-            "client_secret": FACEBOOK_APP_SECRET,
-            "fb_exchange_token": FACEBOOK_USER_TOKEN,
-        }
-        r = requests.get(url, params=params).json()
-        long_token = r.get("access_token")
-        if not long_token:
-            print("Facebook: Failed to refresh token:", r)
-            return None
-
-        url = f"https://graph.facebook.com/{FACEBOOK_PAGE_ID}"
-        params = {
-            "fields": "access_token",
-            "access_token": long_token
-        }
-        r = requests.get(url, params=params).json()
-        return r.get("access_token")
-    except Exception as e:
-        print("Facebook token error:", e)
-        return None
-
-
 def connect_facebook():
     print("🟢 Connecting to Facebook...")
-    token = get_facebook_page_token()
+    token = FACEBOOK_USER_ACCESS_TOKEN
     if not token:
-        print("❌ Facebook: Could not get page token")
+        print("❌ Facebook: No user access token set")
         return
 
     url = f"https://streaming-graph.facebook.com/{FACEBOOK_PAGE_ID}/live_comments"
@@ -153,6 +130,8 @@ def connect_facebook():
                 print("Facebook error:", r.text)
                 return
             print("✅ Connected to Facebook live chat")
+            requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data="✅ Facebook connected".encode("utf-8"))
+
             for line in r.iter_lines():
                 if line:
                     try:
@@ -183,6 +162,7 @@ def connect_kick():
 
     def on_open(ws):
         print("✅ Connected to Kick chat")
+        requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data="✅ Kick connected".encode("utf-8"))
         ws.send(f"NICK {KICK_USERNAME}")
         ws.send(f"JOIN #{KICK_CHANNEL}")
 
@@ -197,7 +177,7 @@ def connect_kick():
 # --- Run all ---
 if __name__ == "__main__":
     threading.Thread(target=ntfy_worker, daemon=True).start()
-    threading.Thread(target=ntfy_control_listener, daemon=True).start()
+    threading.Thread(target=ntfy_control, daemon=True).start()
     threading.Thread(target=connect_youtube, daemon=True).start()
     threading.Thread(target=connect_facebook, daemon=True).start()
     threading.Thread(target=connect_kick, daemon=True).start()
