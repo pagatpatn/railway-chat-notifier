@@ -113,38 +113,79 @@ def get_livechat_id(video_id):
     return r["items"][0]["liveStreamingDetails"]["activeLiveChatId"]
 
 
-# --- Facebook ---
+# --- Facebook (Updated) ---
+def get_facebook_page_token():
+    try:
+        url = f"https://graph.facebook.com/v17.0/oauth/access_token"
+        params = {
+            "grant_type": "fb_exchange_token",
+            "client_id": FACEBOOK_APP_ID,
+            "client_secret": FACEBOOK_APP_SECRET,
+            "fb_exchange_token": FACEBOOK_USER_TOKEN,  # changed from SHORT_TOKEN
+        }
+        r = requests.get(url, params=params).json()
+        long_token = r.get("access_token")
+        if not long_token:
+            print("Facebook: Failed to refresh token:", r)
+            return None
+
+        # Get page access token
+        url = f"https://graph.facebook.com/{FACEBOOK_PAGE_ID}"
+        params = {"fields": "access_token", "access_token": long_token}
+        r = requests.get(url, params=params).json()
+        return r.get("access_token")
+    except Exception as e:
+        print("Facebook token error:", e)
+        return None
+
+
+def get_live_video_id(page_token):
+    """Fetch the current live video ID for the page"""
+    try:
+        url = f"https://graph.facebook.com/{FACEBOOK_PAGE_ID}/live_videos"
+        params = {"fields": "id,status", "access_token": page_token}
+        r = requests.get(url, params=params).json()
+        for video in r.get("data", []):
+            if video.get("status") == "LIVE":
+                return video["id"]
+        return None
+    except Exception as e:
+        print("Error fetching live video ID:", e)
+        return None
+
+
 def connect_facebook():
     print("🟢 Connecting to Facebook...")
-    token = FACEBOOK_USER_ACCESS_TOKEN
+    token = get_facebook_page_token()
     if not token:
-        print("❌ Facebook: No user access token set")
+        print("❌ Facebook: Could not get page token")
         return
 
-    url = f"https://streaming-graph.facebook.com/{FACEBOOK_PAGE_ID}/live_comments"
-    params = {"access_token": token, "comment_rate": 1, "fields": "from{name},message"}
+    live_id = get_live_video_id(token)
+    if not live_id:
+        print("❌ Facebook: No active live video found")
+        return
+
+    url = f"https://graph.facebook.com/{live_id}/comments"
+    params = {
+        "access_token": token,
+        "live_filter": "stream",
+        "fields": "from,message"
+    }
 
     try:
-        with requests.get(url, params=params, stream=True) as r:
-            if r.status_code != 200:
-                print("Facebook error:", r.text)
-                return
-            print("✅ Connected to Facebook live chat")
-            requests.post(f"https://ntfy.sh/{NTFY_TOPIC}", data="✅ Facebook connected".encode("utf-8"))
-
-            for line in r.iter_lines():
-                if line:
-                    try:
-                        data = json.loads(line.decode("utf-8").split(":", 1)[-1])
-                        if "message" in data:
-                            user = data["from"]["name"]
-                            msg = data["message"]
-                            print(f"[Facebook] {user}: {msg}")
-                            send_ntfy("Facebook", user, msg)
-                    except:
-                        pass
+        print(f"✅ Connected to Facebook live chat (Video ID: {live_id})")
+        while True:
+            r = requests.get(url, params=params).json()
+            for comment in r.get("data", []):
+                user = comment["from"]["name"]
+                msg = comment["message"]
+                print(f"[Facebook] {user}: {msg}")
+                send_ntfy("Facebook", user, msg)
+            time.sleep(5)  # poll every 5s
     except Exception as e:
         print("Facebook stream error:", e)
+
 
 
 # --- Kick ---
