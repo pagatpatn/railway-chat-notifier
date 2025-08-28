@@ -14,49 +14,27 @@ YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "")
 FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID", "")
 FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
-FACEBOOK_USER_TOKEN = os.getenv("FACEBOOK_USER_TOKEN", "")  # long-lived user token
+FACEBOOK_USER_TOKEN = os.getenv("FACEBOOK_USER_TOKEN", "")
 KICK_USERNAME = os.getenv("KICK_USERNAME", "")
 KICK_CHANNEL = os.getenv("KICK_CHANNEL", "")
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "chat-notifier")  # for chat messages
-NTFY_CONTROL_TOPIC = os.getenv("NTFY_CONTROL_TOPIC", "chatcontrol")  # for !start/!stop control
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "streamchats123")   # where chat messages go
+NTFY_CONTROL_TOPIC = os.getenv("NTFY_CONTROL_TOPIC", "chatcontrol")  # where start/stop comes from
 
 # --- Queue for ntfy messages ---
 ntfy_queue = queue.Queue()
 running = True
 
 
-# --- NTFY Worker (with start/stop) ---
+# --- NTFY Worker (sends chat messages) ---
 def ntfy_worker():
     global running
     print("📡 NTFY Worker started")
-
-    def control_listener():
-        global running
-        url = f"https://ntfy.sh/{NTFY_CONTROL_TOPIC}/json"
-        print(f"📡 Listening for control commands on {url}")
-        with requests.get(url, stream=True) as r:
-            for line in r.iter_lines():
-                if line:
-                    try:
-                        data = json.loads(line.decode("utf-8"))
-                        msg = data.get("message", "").strip().lower()
-                        if msg == "!stop":
-                            running = False
-                            print("⏹️ Received STOP command")
-                        elif msg == "!start":
-                            running = True
-                            print("▶️ Received START command")
-                    except:
-                        pass
-
-    threading.Thread(target=control_listener, daemon=True).start()
-
     while True:
         try:
-            topic, user, msg = ntfy_queue.get()
+            platform, user, msg = ntfy_queue.get()
             if running:
                 requests.post(f"https://ntfy.sh/{NTFY_TOPIC}",
-                              data=f"[{topic}] {user}: {msg}".encode("utf-8"))
+                              data=f"[{platform}] {user}: {msg}".encode("utf-8"))
                 time.sleep(5)  # delay between messages
         except Exception as e:
             print("NTFY Worker error:", e)
@@ -64,6 +42,31 @@ def ntfy_worker():
 
 def send_ntfy(platform, user, msg):
     ntfy_queue.put((platform, user, msg))
+
+
+# --- NTFY Control Listener (start/stop) ---
+def ntfy_control_listener():
+    global running
+    url = f"https://ntfy.sh/{NTFY_CONTROL_TOPIC}/json"
+    print(f"📡 Listening for control messages on {url}")
+    try:
+        with requests.get(url, stream=True) as r:
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line.decode("utf-8"))
+                    msg = data.get("message", "").strip().lower()
+                    if msg == "start":
+                        running = True
+                        print("▶️ Control: START received")
+                    elif msg == "stop":
+                        running = False
+                        print("⏹️ Control: STOP received")
+                except Exception:
+                    continue
+    except Exception as e:
+        print("NTFY control listener error:", e)
 
 
 # --- YouTube ---
@@ -194,6 +197,7 @@ def connect_kick():
 # --- Run all ---
 if __name__ == "__main__":
     threading.Thread(target=ntfy_worker, daemon=True).start()
+    threading.Thread(target=ntfy_control_listener, daemon=True).start()
     threading.Thread(target=connect_youtube, daemon=True).start()
     threading.Thread(target=connect_facebook, daemon=True).start()
     threading.Thread(target=connect_kick, daemon=True).start()
