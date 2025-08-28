@@ -21,7 +21,6 @@ FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID")
 FACEBOOK_USER_TOKEN = os.getenv("FACEBOOK_USER_TOKEN")
 
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "streamchats123")
-NTFY_CONTROL_TOPIC = os.getenv("NTFY_CONTROL_TOPIC", "chatcontrol")
 
 # =====================
 # Facebook Token Logic
@@ -68,8 +67,11 @@ FACEBOOK_PAGE_TOKEN = init_facebook_tokens()
 # =====================
 def send_ntfy(msg):
     url = f"https://ntfy.sh/{NTFY_TOPIC}"
-    requests.post(url, data=msg.encode("utf-8"))
-    print(f"📢 Sent to NTFY: {msg}")
+    try:
+        requests.post(url, data=msg.encode("utf-8"))
+        print(f"📢 Sent to NTFY: {msg}")
+    except Exception as e:
+        print("NTFY send error:", e)
 
 def notify_connected(service):
     send_ntfy(f"✅ {service} connected successfully!")
@@ -78,14 +80,13 @@ def notify_connected(service):
 # YouTube Live Chat
 # =====================
 def get_live_chat_id():
+    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
     if YOUTUBE_VIDEO_ID:  # use fixed video id
-        youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
         response = youtube.videos().list(part="liveStreamingDetails", id=YOUTUBE_VIDEO_ID).execute()
         items = response.get("items", [])
         if items and "liveStreamingDetails" in items[0]:
             return items[0]["liveStreamingDetails"].get("activeLiveChatId")
     else:  # fallback to search (quota heavy)
-        youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
         request = youtube.search().list(
             part="id",
             channelId=YOUTUBE_CHANNEL_ID,
@@ -140,12 +141,54 @@ async def kick_chat():
         print("Kick connection error:", e)
 
 # =====================
+# Facebook Live Chat
+# =====================
+def get_live_video_id():
+    url = f"https://graph.facebook.com/v18.0/{FACEBOOK_PAGE_ID}/live_videos"
+    params = {"access_token": FACEBOOK_PAGE_TOKEN, "fields": "id,status"}
+    r = requests.get(url, params=params)
+    data = r.json()
+    if "data" in data:
+        for vid in data["data"]:
+            if vid.get("status") == "LIVE":
+                return vid["id"]
+    return None
+
+async def facebook_chat():
+    live_id = get_live_video_id()
+    if not live_id:
+        print("❌ No active Facebook live found.")
+        return
+
+    notify_connected("Facebook")
+
+    last_seen = set()
+    while True:
+        try:
+            url = f"https://graph.facebook.com/v18.0/{live_id}/comments"
+            params = {"access_token": FACEBOOK_PAGE_TOKEN}
+            r = requests.get(url, params=params)
+            data = r.json()
+            for c in data.get("data", []):
+                cid = c["id"]
+                if cid not in last_seen:
+                    author = c.get("from", {}).get("name", "Unknown")
+                    msg = c.get("message", "")
+                    send_ntfy(f"[Facebook] {author}: {msg}")
+                    last_seen.add(cid)
+            time.sleep(10)
+        except Exception as e:
+            print("Facebook chat error:", e)
+            time.sleep(30)
+
+# =====================
 # Main Runner
 # =====================
 async def main():
     await asyncio.gather(
         youtube_chat(),
-        kick_chat()
+        kick_chat(),
+        facebook_chat()
     )
 
 if __name__ == "__main__":
