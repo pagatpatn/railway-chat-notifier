@@ -32,6 +32,9 @@ def ntfy_worker():
     global running
     print("📡 NTFY Worker started")
 
+    # Notify on startup
+    send_ntfy("System", "NTFY", "✅ NTFY Worker Connected")
+
     while True:
         try:
             topic, user, msg = ntfy_queue.get()
@@ -85,6 +88,7 @@ def connect_youtube():
                 f"&part=snippet,authorDetails&key={YOUTUBE_API_KEY}"
             )
             print("✅ Connected to YouTube live chat")
+            send_ntfy("System", "YouTube", "✅ Connected to YouTube live chat")
 
             page_token = None
             while True:
@@ -167,6 +171,8 @@ def connect_facebook():
                 return
 
             print("✅ Connected to Facebook live chat")
+            send_ntfy("System", "Facebook", "✅ Connected to Facebook live chat")
+
             for line in r.iter_lines():
                 if line:
                     try:
@@ -197,6 +203,7 @@ def connect_kick():
 
     def on_open(ws):
         print("✅ Connected to Kick chat")
+        send_ntfy("System", "Kick", "✅ Connected to Kick chat")
         ws.send(f"NICK {KICK_USERNAME}")
         ws.send(f"JOIN #{KICK_CHANNEL}")
 
