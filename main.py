@@ -11,15 +11,12 @@ import websocket
 # --- Environment variables (set these in Railway) ---
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")
 YOUTUBE_CHANNEL_ID = os.getenv("YOUTUBE_CHANNEL_ID", "")
-
 FACEBOOK_APP_ID = os.getenv("FACEBOOK_APP_ID", "")
 FACEBOOK_APP_SECRET = os.getenv("FACEBOOK_APP_SECRET", "")
 FACEBOOK_PAGE_ID = os.getenv("FACEBOOK_PAGE_ID", "")
 FACEBOOK_SHORT_TOKEN = os.getenv("FACEBOOK_SHORT_TOKEN", "")
-
 KICK_USERNAME = os.getenv("KICK_USERNAME", "")
 KICK_CHANNEL = os.getenv("KICK_CHANNEL", "")
-
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "chat-notifier")
 
 # --- Queue for ntfy messages ---
@@ -31,14 +28,9 @@ running = True
 def ntfy_worker():
     global running
     print("📡 NTFY Worker started")
-
-    # Notify on startup
-    send_ntfy("System", "NTFY", "✅ NTFY Worker Connected")
-
     while True:
         try:
             topic, user, msg = ntfy_queue.get()
-
             if msg.strip().lower() == "!stop":
                 running = False
                 print("⏹️ Received STOP command")
@@ -49,10 +41,8 @@ def ntfy_worker():
                 continue
 
             if running:
-                requests.post(
-                    f"https://ntfy.sh/{NTFY_TOPIC}",
-                    data=f"[{topic}] {user}: {msg}".encode("utf-8")
-                )
+                requests.post(f"https://ntfy.sh/{NTFY_TOPIC}",
+                              data=f"[{topic}] {user}: {msg}".encode("utf-8"))
                 time.sleep(5)  # delay 5s between messages
         except Exception as e:
             print("NTFY Worker error:", e)
@@ -65,38 +55,24 @@ def send_ntfy(platform, user, msg):
 # --- YouTube ---
 def connect_youtube():
     print("🟢 Connecting to YouTube...")
-
     while True:
         try:
-            url = (
-                f"https://www.googleapis.com/youtube/v3/search"
-                f"?part=snippet&channelId={YOUTUBE_CHANNEL_ID}"
-                f"&type=video&eventType=live&key={YOUTUBE_API_KEY}"
-            )
+            url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&channelId={YOUTUBE_CHANNEL_ID}&type=video&eventType=live&key={YOUTUBE_API_KEY}"
             r = requests.get(url).json()
             items = r.get("items", [])
-
             if not items:
                 print("YouTube: No live stream currently.")
                 time.sleep(10)
                 continue
 
             video_id = items[0]["id"]["videoId"]
-            live_url = (
-                f"https://www.googleapis.com/youtube/v3/liveChat/messages"
-                f"?liveChatId={get_livechat_id(video_id)}"
-                f"&part=snippet,authorDetails&key={YOUTUBE_API_KEY}"
-            )
-            print("✅ Connected to YouTube live chat")
-            send_ntfy("System", "YouTube", "✅ Connected to YouTube live chat")
+            live_url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId={get_livechat_id(video_id)}&part=snippet,authorDetails&key={YOUTUBE_API_KEY}"
 
+            print("✅ Connected to YouTube live chat")
             page_token = None
             while True:
-                resp = requests.get(
-                    live_url + (f"&pageToken={page_token}" if page_token else "")
-                )
+                resp = requests.get(live_url + (f"&pageToken={page_token}" if page_token else ""))
                 data = resp.json()
-
                 for item in data.get("items", []):
                     user = item["authorDetails"]["displayName"]
                     msg = item["snippet"]["displayMessage"]
@@ -105,17 +81,13 @@ def connect_youtube():
 
                 page_token = data.get("nextPageToken")
                 time.sleep(5)
-
         except Exception as e:
             print("YouTube error:", e)
             time.sleep(10)
 
 
 def get_livechat_id(video_id):
-    url = (
-        f"https://www.googleapis.com/youtube/v3/videos"
-        f"?part=liveStreamingDetails&id={video_id}&key={YOUTUBE_API_KEY}"
-    )
+    url = f"https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id={video_id}&key={YOUTUBE_API_KEY}"
     r = requests.get(url).json()
     return r["items"][0]["liveStreamingDetails"]["activeLiveChatId"]
 
@@ -123,7 +95,7 @@ def get_livechat_id(video_id):
 # --- Facebook ---
 def get_facebook_page_token():
     try:
-        url = "https://graph.facebook.com/v17.0/oauth/access_token"
+        url = f"https://graph.facebook.com/v17.0/oauth/access_token"
         params = {
             "grant_type": "fb_exchange_token",
             "client_id": FACEBOOK_APP_ID,
@@ -132,7 +104,6 @@ def get_facebook_page_token():
         }
         r = requests.get(url, params=params).json()
         long_token = r.get("access_token")
-
         if not long_token:
             print("Facebook: Failed to refresh token:", r)
             return None
@@ -144,7 +115,6 @@ def get_facebook_page_token():
         }
         r = requests.get(url, params=params).json()
         return r.get("access_token")
-
     except Exception as e:
         print("Facebook token error:", e)
         return None
@@ -158,21 +128,14 @@ def connect_facebook():
         return
 
     url = f"https://streaming-graph.facebook.com/{FACEBOOK_PAGE_ID}/live_comments"
-    params = {
-        "access_token": token,
-        "comment_rate": 1,
-        "fields": "from{name},message"
-    }
+    params = {"access_token": token, "comment_rate": 1, "fields": "from{name},message"}
 
     try:
         with requests.get(url, params=params, stream=True) as r:
             if r.status_code != 200:
                 print("Facebook error:", r.text)
                 return
-
             print("✅ Connected to Facebook live chat")
-            send_ntfy("System", "Facebook", "✅ Connected to Facebook live chat")
-
             for line in r.iter_lines():
                 if line:
                     try:
@@ -203,7 +166,6 @@ def connect_kick():
 
     def on_open(ws):
         print("✅ Connected to Kick chat")
-        send_ntfy("System", "Kick", "✅ Connected to Kick chat")
         ws.send(f"NICK {KICK_USERNAME}")
         ws.send(f"JOIN #{KICK_CHANNEL}")
 
