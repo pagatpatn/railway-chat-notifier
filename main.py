@@ -196,7 +196,7 @@ def connect_kick():
 if __name__ == "__main__":
     threading.Thread(target=ntfy_worker, daemon=True).start()
     threading.Thread(target=connect_youtube, daemon=True).start()
-    threading.Thread(target=connect_facebook, daemon=True).start()
+    threading.Thread(target=refresh_facebook_token, daemon=True).start()
     threading.Thread(target=connect_kick, daemon=True).start()
 
     while True:
