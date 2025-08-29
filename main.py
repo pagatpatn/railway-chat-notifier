@@ -93,38 +93,52 @@ def get_livechat_id(video_id):
 
 
 # --- Facebook ---
-def get_facebook_page_token():
-    try:
-        url = f"https://graph.facebook.com/v17.0/oauth/access_token"
-        params = {
-            "grant_type": "fb_exchange_token",
-            "client_id": FACEBOOK_APP_ID,
-            "client_secret": FACEBOOK_APP_SECRET,
-            "fb_exchange_token": FACEBOOK_SHORT_TOKEN,
-        }
-        r = requests.get(url, params=params).json()
-        long_token = r.get("access_token")
-        if not long_token:
-            print("Facebook: Failed to refresh token:", r)
-            return None
+def refresh_facebook_token():
+    """Fetch or refresh a valid Page token continuously."""
+    while True:
+        try:
+            url = "https://graph.facebook.com/v17.0/oauth/access_token"
+            params = {
+                "grant_type": "fb_exchange_token",
+                "client_id": FACEBOOK_APP_ID,
+                "client_secret": FACEBOOK_APP_SECRET,
+                "fb_exchange_token": FACEBOOK_SHORT_TOKEN,
+            }
+            r = requests.get(url, params=params).json()
+            long_token = r.get("access_token")
+            if not long_token:
+                print("Facebook: Failed to refresh user token:", r)
+                time.sleep(60)
+                continue
 
-        url = f"https://graph.facebook.com/{FACEBOOK_PAGE_ID}"
-        params = {
-            "fields": "access_token",
-            "access_token": long_token
-        }
-        r = requests.get(url, params=params).json()
-        return r.get("access_token")
-    except Exception as e:
-        print("Facebook token error:", e)
+            url = f"https://graph.facebook.com/{FACEBOOK_PAGE_ID}"
+            params = {"fields": "access_token", "access_token": long_token}
+            r = requests.get(url, params=params).json()
+            page_token = r.get("access_token")
+
+            if page_token:
+                print("🔄 Refreshed Facebook Page token")
+                with open("fb_page_token.txt", "w") as f:
+                    f.write(page_token)
+        except Exception as e:
+            print("Facebook token refresh error:", e)
+        time.sleep(60 * 30)  # refresh every 30 min
+
+
+def get_saved_page_token():
+    try:
+        with open("fb_page_token.txt", "r") as f:
+            return f.read().strip()
+    except FileNotFoundError:
         return None
 
 
 def connect_facebook():
     print("🟢 Connecting to Facebook...")
-    token = get_facebook_page_token()
+    token = get_saved_page_token()
     if not token:
-        print("❌ Facebook: Could not get page token")
+        print("❌ Facebook: No page token available yet, waiting for refresh...")
+        time.sleep(30)
         return
 
     url = f"https://streaming-graph.facebook.com/{FACEBOOK_PAGE_ID}/live_comments"
@@ -149,6 +163,7 @@ def connect_facebook():
                         pass
     except Exception as e:
         print("Facebook stream error:", e)
+
 
 
 # --- Kick ---
