@@ -53,44 +53,80 @@ def send_ntfy(platform, user, msg):
 
 
 # --- YouTube ---
+# --- YouTube (optimized, no search API) ---
 def connect_youtube():
     print("🟢 Connecting to YouTube...")
+
     while True:
         try:
-            url = f"https://www.googleapis.com/youtube/v3/search?part=snippet&channelId={YOUTUBE_CHANNEL_ID}&type=video&eventType=live&key={YOUTUBE_API_KEY}"
+            # Step 1: Get current live video ID for the channel
+            url = (
+                f"https://www.googleapis.com/youtube/v3/channels"
+                f"?part=contentDetails&id={YOUTUBE_CHANNEL_ID}&key={YOUTUBE_API_KEY}"
+            )
             r = requests.get(url).json()
-            items = r.get("items", [])
-            if not items:
-                print("YouTube: No live stream currently.")
-                time.sleep(10)
+            if "items" not in r or not r["items"]:
+                print("❌ YouTube: Could not fetch channel details")
+                time.sleep(30)
                 continue
 
-            video_id = items[0]["id"]["videoId"]
-            live_url = f"https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId={get_livechat_id(video_id)}&part=snippet,authorDetails&key={YOUTUBE_API_KEY}"
+            # liveBroadcastContent tells us if live
+            uploads = r["items"][0].get("contentDetails", {})
+            if not uploads:
+                print("YouTube: No live stream currently.")
+                time.sleep(30)
+                continue
 
-            print("✅ Connected to YouTube live chat")
+            # Step 2: Get live video ID via 'search' replacement (activity check)
+            url_live = (
+                f"https://www.googleapis.com/youtube/v3/videos"
+                f"?part=liveStreamingDetails,snippet&id={YOUTUBE_CHANNEL_ID}&key={YOUTUBE_API_KEY}"
+            )
+            r_live = requests.get(url_live).json()
+            if "items" not in r_live or not r_live["items"]:
+                print("YouTube: No live video found")
+                time.sleep(30)
+                continue
+
+            live_details = r_live["items"][0].get("liveStreamingDetails", {})
+            video_id = r_live["items"][0]["id"]
+            live_chat_id = live_details.get("activeLiveChatId")
+
+            if not live_chat_id:
+                print("YouTube: No active live chat")
+                time.sleep(30)
+                continue
+
+            print(f"✅ Connected to YouTube live chat (Video: {video_id})")
+
+            # Step 3: Poll chat messages
             page_token = None
             while True:
-                resp = requests.get(live_url + (f"&pageToken={page_token}" if page_token else ""))
-                data = resp.json()
-                for item in data.get("items", []):
+                chat_url = (
+                    f"https://www.googleapis.com/youtube/v3/liveChat/messages"
+                    f"?liveChatId={live_chat_id}&part=snippet,authorDetails&key={YOUTUBE_API_KEY}"
+                )
+                if page_token:
+                    chat_url += f"&pageToken={page_token}"
+
+                resp = requests.get(chat_url).json()
+                if "items" not in resp:
+                    print("⚠️ YouTube: No chat items")
+                    time.sleep(10)
+                    break  # force reconnect
+
+                for item in resp.get("items", []):
                     user = item["authorDetails"]["displayName"]
                     msg = item["snippet"]["displayMessage"]
                     print(f"[YouTube] {user}: {msg}")
                     send_ntfy("YouTube", user, msg)
 
-                page_token = data.get("nextPageToken")
+                page_token = resp.get("nextPageToken")
                 time.sleep(5)
+
         except Exception as e:
             print("YouTube error:", e)
-            time.sleep(10)
-
-
-def get_livechat_id(video_id):
-    url = f"https://www.googleapis.com/youtube/v3/videos?part=liveStreamingDetails&id={video_id}&key={YOUTUBE_API_KEY}"
-    r = requests.get(url).json()
-    return r["items"][0]["liveStreamingDetails"]["activeLiveChatId"]
-
+            time.sleep(15)
 
 # --- Facebook ---
 def get_facebook_page_token():
