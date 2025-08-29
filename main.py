@@ -52,104 +52,84 @@ def send_ntfy(platform, user, msg):
     ntfy_queue.put((platform, user, msg))
 
 
-# --- YouTube (no search API) ---
+# --- YouTube ---
+def get_youtube_live_chat_id():
+    """Get the active YouTube live stream video + live chat ID"""
+    try:
+        url = (
+            f"https://www.googleapis.com/youtube/v3/liveBroadcasts"
+            f"?part=snippet,contentDetails,status"
+            f"&broadcastStatus=active"
+            f"&broadcastType=all"
+            f"&key={YOUTUBE_API_KEY}"
+        )
+        r = requests.get(url).json()
+        if "items" not in r or not r["items"]:
+            print("❌ No active YouTube live stream found.")
+            return None, None
+
+        broadcast = r["items"][0]
+        video_id = broadcast["id"]
+        live_chat_id = broadcast["snippet"].get("liveChatId")
+
+        if not live_chat_id:
+            print("❌ Active stream has no live chat.")
+            return None, None
+
+        print(f"✅ Found YouTube live: Video ID {video_id}")
+        send_ntfy("YouTube", "System", f"✅ Connected to YouTube live {video_id}")
+        return video_id, live_chat_id
+
+    except Exception as e:
+        print("YouTube API error:", e)
+        return None, None
+
+
 def connect_youtube():
     print("🟢 Connecting to YouTube...")
 
     while True:
         try:
-            # Step 1: Get channel details (snippet includes liveBroadcastContent)
-            url = (
-                f"https://www.googleapis.com/youtube/v3/channels"
-                f"?part=snippet,contentDetails&id={YOUTUBE_CHANNEL_ID}&key={YOUTUBE_API_KEY}"
-            )
-            r = requests.get(url).json()
-            if "items" not in r or not r["items"]:
-                print("❌ YouTube: Could not fetch channel details")
-                time.sleep(30)
-                continue
-
-            channel = r["items"][0]
-            broadcast_status = channel["snippet"].get("liveBroadcastContent", "none")
-            if broadcast_status != "live":
-                print("YouTube: Channel is not live right now.")
-                time.sleep(30)
-                continue
-
-            # Step 2: Get live video ID via activities (low quota)
-            url_activity = (
-                f"https://www.googleapis.com/youtube/v3/activities"
-                f"?part=contentDetails&channelId={YOUTUBE_CHANNEL_ID}&maxResults=1&key={YOUTUBE_API_KEY}"
-            )
-            act = requests.get(url_activity).json()
-            if "items" not in act or not act["items"]:
-                print("YouTube: No recent activity found")
-                time.sleep(30)
-                continue
-
-            # Look for upload or live broadcast
-            video_id = None
-            content = act["items"][0].get("contentDetails", {})
-            if "upload" in content:
-                video_id = content["upload"]["videoId"]
-            elif "liveBroadcast" in content:
-                video_id = content["liveBroadcast"]["videoId"]
-
-            if not video_id:
-                print("YouTube: Could not determine live video ID")
-                time.sleep(30)
-                continue
-
-            # Step 3: Get the liveChatId from the video
-            url_video = (
-                f"https://www.googleapis.com/youtube/v3/videos"
-                f"?part=liveStreamingDetails&id={video_id}&key={YOUTUBE_API_KEY}"
-            )
-            r_video = requests.get(url_video).json()
-            if "items" not in r_video or not r_video["items"]:
-                print("YouTube: No video details found")
-                time.sleep(30)
-                continue
-
-            live_details = r_video["items"][0].get("liveStreamingDetails", {})
-            live_chat_id = live_details.get("activeLiveChatId")
-
+            # Get live broadcast & chat id
+            video_id, live_chat_id = get_youtube_live_chat_id()
             if not live_chat_id:
-                print("YouTube: No active live chat")
-                time.sleep(30)
+                time.sleep(10)
                 continue
 
-            print(f"✅ Connected to YouTube live chat (Video ID: {video_id})")
-            send_ntfy("YouTube", "System", "✅ Connected to YouTube Live Chat")
+            url = (
+                f"https://www.googleapis.com/youtube/v3/liveChat/messages"
+                f"?liveChatId={live_chat_id}"
+                f"&part=snippet,authorDetails"
+                f"&key={YOUTUBE_API_KEY}"
+            )
 
-            # Step 4: Poll chat messages
+            print("✅ Connected to YouTube live chat")
             page_token = None
+
             while True:
-                chat_url = (
-                    f"https://www.googleapis.com/youtube/v3/liveChat/messages"
-                    f"?liveChatId={live_chat_id}&part=snippet,authorDetails&key={YOUTUBE_API_KEY}"
+                resp = requests.get(
+                    url + (f"&pageToken={page_token}" if page_token else "")
                 )
-                if page_token:
-                    chat_url += f"&pageToken={page_token}"
+                data = resp.json()
 
-                resp = requests.get(chat_url).json()
-                if "items" not in resp:
-                    print("⚠️ YouTube: No chat items (maybe stream ended?)")
-                    time.sleep(10)
-                    break  # reconnect outer loop
+                # If no items → maybe stream ended, restart
+                if "items" not in data:
+                    print("⚠️ No messages, rechecking live status...")
+                    break
 
-                for item in resp.get("items", []):
+                for item in data.get("items", []):
                     user = item["authorDetails"]["displayName"]
                     msg = item["snippet"]["displayMessage"]
                     print(f"[YouTube] {user}: {msg}")
                     send_ntfy("YouTube", user, msg)
 
-                page_token = resp.get("nextPageToken")
+                page_token = data.get("nextPageToken")
                 time.sleep(5)
 
         except Exception as e:
             print("YouTube error:", e)
-            time.sleep(15)
+            time.sleep(10)
+
 
 
 # --- Facebook ---
